@@ -1,303 +1,56 @@
-# Local MCP Server, Client, and Local LLM
+# Component 2: The MCP Server
 
-This repo is a beginner-friendly example of how to build a local [Model Context Protocol](https://modelcontextprotocol.io/) stack:
+This is the "brain" of the stack. It is a [FastMCP](https://github.com/jlowin/fastmcp)-based server that exposes tools and resources to MCP clients, backed by a local Ollama LLM, and wrapped in a custom production-grade security layer.
 
-- an MCP server
-- an MCP client
-- local tools and resources
-- a local LLM backend using Ollama
-
-It is designed to do two jobs at once:
-
-1. help you run a working local MCP project
-2. help you understand what MCP is and how its pieces fit together
-
-No cloud account is required. No hosted model is required. Everything can run on your own machine.
-
-Security is a main concern in this repo. The goal is not just to show the happy-path MCP flow, but also to show how a local MCP stack can be built with real guardrails around tools, resources, and LLM access.
+> [!NOTE]
+> Before proceeding here, make sure you have completed **[Component 1: LLM Provider](../1-llm/README.md)** and Ollama is running with at least one model pulled.
 
 ---
 
-## What Is MCP?
-
-MCP, or Model Context Protocol, is a standard way for an AI client to talk to tools, resources, and prompts exposed by a server.
-
-In simple terms:
-
-- the **client** asks for available capabilities
-- the **server** exposes those capabilities in a standard format
-- the **LLM** can use those capabilities through the client-server connection
-
-If you are brand new, the easiest mental model is:
-
-- **MCP client** = the app that wants to use tools or fetch context
-- **MCP server** = the app that publishes those tools/resources
-- **Tool** = an action, like `ollama-chat` or `echo`
-- **Resource** = read-only context, like `config://server`
-- **Transport** = how client and server talk, such as `stdio` or `SSE`
-
----
-
-## What This Repo Teaches
-
-By reading and running this project, you can learn:
-
-- how an MCP server is structured
-- how MCP tools are registered
-- how MCP resources are exposed
-- how a client connects and calls tools
-- how a local LLM can sit behind an MCP tool
-- how security layers like auth, scopes, rate limiting, and audit logging can be added
-
-If your main interest is security, read [SECURITY_ARCHITECTURE.md](/Users/shashank/MCPP/mcp-server/SECURITY_ARCHITECTURE.md:1) alongside this README.
-
----
-
-## Architecture
-
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
-flowchart LR
-    Client["MCP Client<br/>Claude Desktop<br/>Streamlit UI<br/>Custom Client"]
-    Server["MCP Server<br/>Tools<br/>Resources<br/>Security Layer"]
-    LLM["Local LLM<br/>Ollama<br/>Local Model"]
-
-    Client -->|"MCP over stdio / SSE"| Server
-    Server -->|"provider call"| LLM
-```
-
-In this repo:
-
-- the MCP server lives in [`mcp_server/`](/Users/shashank/MCPP/mcp-server/mcp_server)
-- the local chat client lives in [`ui/`](/Users/shashank/MCPP/mcp-server/ui)
-- the local LLM provider is Ollama, wired through [`mcp_server/providers/ollama.py`](/Users/shashank/MCPP/mcp-server/mcp_server/providers/ollama.py:1)
-- the security design is explained in [SECURITY_ARCHITECTURE.md](/Users/shashank/MCPP/mcp-server/SECURITY_ARCHITECTURE.md:1)
-
----
-
-## MCP Concepts With Tiny Examples
-
-These are teaching snippets first. The full implementation in this repo is more structured and secure.
-
-### 1. Minimal MCP Server
-
-This is the basic idea of an MCP server: create a server and register capabilities.
-
-```python
-from mcp.server.fastmcp import FastMCP
-
-app = FastMCP("Example Server")
-
-@app.tool()
-def echo(message: str) -> str:
-    return f"Echo: {message}"
-
-app.run(transport="stdio")
-```
-
-In this repo, that idea is extended by [`SecureMCP`](/Users/shashank/MCPP/mcp-server/mcp_server/core/app.py:17), which adds authentication, authorization, rate limiting, and audit logging around the MCP server.
-
-That security-first design is described in more depth in [SECURITY_ARCHITECTURE.md](/Users/shashank/MCPP/mcp-server/SECURITY_ARCHITECTURE.md:1).
-
-### 2. Minimal Tool
-
-A tool is something the client can execute.
-
-```python
-@app.tool(name="add")
-def add(a: int, b: int) -> int:
-    return a + b
-```
-
-In this repo, tool registration happens in:
-
-- [`mcp_server/api/tools/util.py`](/Users/shashank/MCPP/mcp-server/mcp_server/api/tools/util.py:1)
-- [`mcp_server/api/tools/llm.py`](/Users/shashank/MCPP/mcp-server/mcp_server/api/tools/llm.py:1)
-
-Examples from this repo:
-
-- `echo`
-- `ollama-chat`
-- `ollama-list-models`
-
-### 3. Minimal Resource
-
-A resource is read-only context exposed by the server.
-
-```python
-@app.resource("config://app")
-def app_config() -> str:
-    return '{"name": "demo", "env": "local"}'
-```
-
-In this repo, the built-in resource is registered in [`mcp_server/api/resources.py`](/Users/shashank/MCPP/mcp-server/mcp_server/api/resources.py:1).
-
-### 4. Minimal Client
-
-A client connects to the MCP server, initializes the session, and then calls tools or reads resources.
-
-```python
-from mcp import ClientSession
-from mcp.client.sse import sse_client
-
-async with sse_client("http://127.0.0.1:8080/sse") as (read_stream, write_stream):
-    async with ClientSession(read_stream, write_stream) as session:
-        await session.initialize()
-        result = await session.call_tool("echo", arguments={"message": "hello"})
-```
-
-In this repo, the working client logic is in [`ui/chat_service.py`](/Users/shashank/MCPP/mcp-server/ui/chat_service.py:18).
-
----
-
-## How MCP Flows In Practice
-
-Here is the normal interaction pattern:
-
-1. The client connects to the server.
-2. The client sends `initialize`.
-3. The client asks what tools/resources exist.
-4. The client calls a tool or reads a resource.
-5. The server performs the action and returns structured data.
-
-```mermaid
-
-sequenceDiagram
-    participant Client as MCP Client
-    participant Server as MCP Server
-    participant LLM as Local LLM
-
-    Client->>Server: initialize
-    Client->>Server: tools/list or resources/list
-    Client->>Server: tools/call or resources/read
-    Server->>LLM: provider request when needed
-    LLM-->>Server: model response
-    Server-->>Client: structured MCP response
-```
-
-### Example: `initialize`
-
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "initialize",
-  "params": {
-    "protocolVersion": "2024-11-05",
-    "clientInfo": {
-      "name": "demo-client",
-      "version": "1.0.0"
-    },
-    "capabilities": {}
-  },
-  "id": 1
-}
-```
-
-### Example: `tools/list`
-
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "tools/list",
-  "params": {},
-  "id": 2
-}
-```
-
-### Example: `tools/call`
-
-```json
-{
-  "jsonrpc": "2.0",
-  "method": "tools/call",
-  "params": {
-    "name": "echo",
-    "arguments": {
-      "message": "hello from MCP"
-    }
-  },
-  "id": 3
-}
-```
-
----
-
-## How This Repo Maps To Those Concepts
-
-If you want to learn the codebase in a good order, read these files first:
-
-1. [`README.md`](/Users/shashank/MCPP/mcp-server/README.md:1)
-2. [`mcp_server/main.py`](/Users/shashank/MCPP/mcp-server/mcp_server/main.py:1)
-3. [`mcp_server/core/app.py`](/Users/shashank/MCPP/mcp-server/mcp_server/core/app.py:17)
-4. [`mcp_server/api/tools/util.py`](/Users/shashank/MCPP/mcp-server/mcp_server/api/tools/util.py:1)
-5. [`mcp_server/api/tools/llm.py`](/Users/shashank/MCPP/mcp-server/mcp_server/api/tools/llm.py:1)
-6. [`mcp_server/api/resources.py`](/Users/shashank/MCPP/mcp-server/mcp_server/api/resources.py:1)
-7. [SECURITY_ARCHITECTURE.md](/Users/shashank/MCPP/mcp-server/SECURITY_ARCHITECTURE.md:1)
-8. [`mcp_server/providers/ollama.py`](/Users/shashank/MCPP/mcp-server/mcp_server/providers/ollama.py:15)
-9. [`ui/chat_service.py`](/Users/shashank/MCPP/mcp-server/ui/chat_service.py:18)
-
-Quick guide to what each area does:
-
-- [`mcp_server/main.py`](/Users/shashank/MCPP/mcp-server/mcp_server/main.py:1): entry point, wiring, startup
-- [`mcp_server/core/app.py`](/Users/shashank/MCPP/mcp-server/mcp_server/core/app.py:17): MCP wrapper plus security interception
-- [`mcp_server/config/settings.py`](/Users/shashank/MCPP/mcp-server/mcp_server/config/settings.py:143): config loading and profiles
-- [`mcp_server/security/`](/Users/shashank/MCPP/mcp-server/mcp_server/security): auth, scopes, rate limiting, audit logging
-- [SECURITY_ARCHITECTURE.md](/Users/shashank/MCPP/mcp-server/SECURITY_ARCHITECTURE.md:1): why these security layers exist and what risks they address
-- [`mcp_server/providers/`](/Users/shashank/MCPP/mcp-server/mcp_server/providers): LLM backend abstraction
-- [`ui/`](/Users/shashank/MCPP/mcp-server/ui): local client application
-- [`tests/`](/Users/shashank/MCPP/mcp-server/tests): working examples of behavior and expected usage
-
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#000000","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
-flowchart TD
-    A["README.md"] --> B["mcp_server/main.py"]
-    B --> C["mcp_server/core/app.py"]
-    C --> D["api/tools"]
-    C --> E["api/resources.py"]
-    C --> F["security/"]
-    B --> G["providers/ollama.py"]
-    A --> H["ui/chat_service.py"]
-    A --> I["SECURITY_ARCHITECTURE.md"]
-```
-
----
-
-## Features In This Repo
-
-- MCP server with `stdio` and `SSE`
-- local MCP client built with Streamlit
-- Ollama-backed local LLM tool
-- pluggable provider layer
-- security-first wrapper around MCP request handling
-- request timeout and request size protection
-- auth keys for protected access
-- scope-based authorization
-- identity-based rate limiting
-- bounded concurrency to protect the local LLM backend
-- audit logging
-- typed config and validation with Pydantic
-- basic tests for config, auth, rate limiting, client behavior, and concurrency
+## What This Server Does
+
+- Exposes **MCP tools** that clients can discover and call.
+- Proxies LLM inference through the `ollama-chat` and `ollama-list-models` tools, never exposing Ollama directly.
+- Wraps every incoming request through a `SecurityInterceptor` that enforces authentication, authorization, rate limiting, and audit logging.
+- Supports both `stdio` (local pipes) and `SSE` (HTTP) transports.
 
 ---
 
 ## Project Structure
 
 ```text
-mcp-server/
+2-server/
 ├── mcp_server/
-│   ├── api/
-│   │   ├── resources.py
-│   │   └── tools/
-│   ├── config/
+│   ├── main.py               ← entry point: wiring, startup
+│   ├── models.py             ← shared Pydantic models
+│   ├── resources.py          ← MCP resources (config://server)
 │   ├── core/
-│   ├── providers/
+│   │   └── app.py            ← SecureMCP wrapper + security interception
+│   ├── config/
+│   │   └── settings.py       ← config loading, profiles, Pydantic validation
 │   ├── security/
-│   └── main.py
-├── ui/
+│   │   ├── interceptor.py    ← protocol-level security funnel
+│   │   ├── auth.py           ← identity resolution (key/IP)
+│   │   ├── rate_limiter.py   ← per-identity rate limiting
+│   │   └── audit.py          ← structured audit logging to stderr
+│   ├── providers/
+│   │   ├── ollama.py         ← Ollama provider + concurrency semaphore
+│   │   └── manager.py        ← provider registry/abstraction
+│   └── tools/
+│       ├── util.py           ← echo tool
+│       ├── llm.py            ← ollama-chat + ollama-list-models tools
+│       └── weather.py        ← weather-get tool
 ├── tests/
-├── config.yaml
+│   ├── test_fastmcp.py
+│   ├── test_chat_service.py
+│   ├── test_rate_limit_identity.py
+│   ├── test_concurrency.py
+│   └── test_config_validation.py
+├── config.yaml               ← default configuration
+├── .env.example              ← all supported environment variables
+├── Dockerfile                ← container build
 ├── pyproject.toml
-└── Makefile
+└── SECURITY_ARCHITECTURE.md  ← deep dive into security design
 ```
 
 ---
@@ -305,249 +58,73 @@ mcp-server/
 ## Prerequisites
 
 - Python 3.11 or newer
-- [Ollama](https://ollama.com/)
-- at least one local Ollama model, for example `llama3.2`
+- [Ollama](https://ollama.com/) running with at least one model (see [`1-llm/`](../1-llm/README.md))
+
+---
+
+## Installation
+
+From the repo root, install all dependencies:
+
+```bash
+make install
+```
+
+Or from inside `2-server/` only:
+
+```bash
+cd 2-server
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
 
 ---
 
 ## Quick Start
 
-### 1. Install
-
-```bash
-git clone <repo-url>
-cd mcp-server
-python3 -m venv .venv
-source .venv/bin/activate
-make install
-```
-
-### 2. Start Ollama and pull a model
-
-```bash
-ollama serve
-ollama pull llama3.2
-```
-
-### 3. Run the MCP server
-
-For local beginner use, the defaults are enough:
+### 1. Run in stdio mode (simplest, for local testing)
 
 ```bash
 make run
 ```
 
-This starts the server with `stdio` transport.
+This starts the server with `stdio` transport — it reads/writes JSON-RPC on stdin/stdout.
 
-### 4. Run the local client
+### 2. Run in SSE mode (required for the Streamlit client)
 
 ```bash
-make run-client
+make run-server-sse
 ```
 
-The UI will open at [http://localhost:8501](http://localhost:8501).
-
----
-
-## Running With SSE
-
-If you want the server to accept HTTP/SSE connections:
+Or manually:
 
 ```bash
 python3 -m mcp_server.main --transport sse
 ```
 
-By default, the repo config uses:
+The SSE endpoint is available at:
 
-- host: `127.0.0.1`
-- port: `8080`
-
-So the SSE endpoint is:
-
-```text
+```
 http://127.0.0.1:8080/sse
 ```
 
-Example request:
-
+Example raw request:
 ```bash
 curl -H "X-MCP-Client-Key: your-secret-key" http://127.0.0.1:8080/sse
 ```
 
 ---
 
-## Beginner Walkthrough
-
-If your goal is to learn MCP, follow this order.
-
-### Step 1. Start the server
-
-```bash
-make run
-```
-
-### Step 2. Read the server entry point
-
-Open [`mcp_server/main.py`](/Users/shashank/MCPP/mcp-server/mcp_server/main.py:1).
-
-Notice the flow:
-
-- load settings
-- create provider
-- create auth, audit, and rate limiter
-- create the secure MCP app
-- register tools and resources
-- run the server
-
-### Step 3. Inspect a simple tool
-
-Open [`mcp_server/api/tools/util.py`](/Users/shashank/MCPP/mcp-server/mcp_server/api/tools/util.py:1).
-
-This is the easiest MCP concept in the repo:
-
-```python
-@app.tool(
-    name="echo",
-    description="Echo a message back to the caller",
-    required_scopes=["tools:util:echo"]
-)
-def echo(message: str) -> str:
-    return f"Echo: {message}"
-```
-
-This shows:
-
-- how a tool is named
-- how arguments are typed
-- how a return value is sent back
-- how the repo adds authorization scopes
-
-### Step 4. Inspect the LLM tool
-
-Open [`mcp_server/api/tools/llm.py`](/Users/shashank/MCPP/mcp-server/mcp_server/api/tools/llm.py:1).
-
-This shows how an MCP tool can act as a safe wrapper around a local LLM backend.
-
-### Step 5. Inspect the client
-
-Open [`ui/chat_service.py`](/Users/shashank/MCPP/mcp-server/ui/chat_service.py:18).
-
-This is where the client:
-
-- connects over SSE
-- initializes a session
-- calls MCP tools
-- handles authentication headers
-
-### Step 6. Inspect the security layer
-
-Open these files:
-
-- [`mcp_server/security/auth.py`](/Users/shashank/MCPP/mcp-server/mcp_server/security/auth.py:1)
-- [`mcp_server/security/interceptor.py`](/Users/shashank/MCPP/mcp-server/mcp_server/security/interceptor.py:1)
-- [`mcp_server/security/rate_limiter.py`](/Users/shashank/MCPP/mcp-server/mcp_server/security/rate_limiter.py:1)
-- [`mcp_server/security/audit.py`](/Users/shashank/MCPP/mcp-server/mcp_server/security/audit.py:1)
-
-This is where the repo goes beyond a toy example.
-
----
-
-## Security Model
-
-This repo includes a practical local-first security setup, and security is treated as a main architectural concern rather than a later add-on.
-
-For the full design rationale, threat framing, and diagrams, see [SECURITY_ARCHITECTURE.md](/Users/shashank/MCPP/mcp-server/SECURITY_ARCHITECTURE.md:1).
-
-Why security matters so much in MCP:
-
-- an MCP server exposes executable capabilities to AI clients
-- if those capabilities are unprotected, anyone reaching the server may enumerate and call tools
-- local LLM backends are expensive enough that they need protection from overload
-- without auditability, it becomes hard to answer who invoked what and whether it succeeded
-- without request bounds, large or hanging requests can degrade the whole service
-
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
-flowchart TD
-    Req["Incoming MCP Request"] --> Auth["Authenticate"]
-    Auth --> Rate["Rate Limit by Identity"]
-    Rate --> Scope["Authorize by Scope"]
-    Scope --> Bounds["Check Size and Timeout Bounds"]
-    Bounds --> Exec["Execute Tool or Resource"]
-    Exec --> Audit["Write Audit Log"]
-    Scope --> Deny["Reject Forbidden Request"]
-    Rate --> Throttle["Reject Rate-Limited Request"]
-    Auth --> Reject["Reject Unauthenticated Request"]
-```
-
-### Modes
-
-The server supports:
-
-- `local`: convenient defaults for local use
-- `dev`: development mode with relaxed behavior
-- `prod`: strict mode requiring auth keys
-
-### Authentication
-
-- `stdio`: reads the client key from `MCP_CLIENT_KEY`
-- `SSE`: reads `X-MCP-Client-Key` or `Authorization: Bearer <key>`
-
-### Authorization
-
-Tools and resources can require scopes.
-
-Examples in this repo:
-
-- `tools:util:echo`
-- `tools:ollama:chat`
-- `tools:ollama:list`
-
-### Rate Limiting
-
-Requests are bucketed by identity:
-
-- authenticated users: by key fingerprint
-- unauthenticated HTTP users: by client IP
-- unauthenticated stdio users: shared anonymous label
-
-```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
-flowchart LR
-    A["Client A"] --> RL["Rate Limiter"]
-    B["Client B"] --> RL
-    C["Client N"] --> RL
-    RL --> Q["Concurrency Guard"]
-    Q --> O["Ollama Provider"]
-```
-
-### Audit Logging
-
-Structured audit events are written to stderr when enabled.
-
-### Security Architecture Reading Path
-
-If you want to study the security design in order, read:
-
-1. [SECURITY_ARCHITECTURE.md](/Users/shashank/MCPP/mcp-server/SECURITY_ARCHITECTURE.md:1)
-2. [`mcp_server/core/app.py`](/Users/shashank/MCPP/mcp-server/mcp_server/core/app.py:17)
-3. [`mcp_server/security/interceptor.py`](/Users/shashank/MCPP/mcp-server/mcp_server/security/interceptor.py:1)
-4. [`mcp_server/security/auth.py`](/Users/shashank/MCPP/mcp-server/mcp_server/security/auth.py:1)
-5. [`mcp_server/security/rate_limiter.py`](/Users/shashank/MCPP/mcp-server/mcp_server/security/rate_limiter.py:1)
-6. [`mcp_server/security/audit.py`](/Users/shashank/MCPP/mcp-server/mcp_server/security/audit.py:1)
-
----
-
 ## Configuration
 
-Configuration is loaded with this precedence:
+Configuration is loaded with this precedence (highest to lowest):
 
-1. environment variables
+1. Environment variables
 2. `config.yaml`
-3. built-in defaults
+3. Built-in defaults
 
-Example config:
-
+**`config.yaml` example:**
 ```yaml
 server:
   host: "127.0.0.1"
@@ -561,24 +138,182 @@ security:
 llm:
   provider: "ollama"
   base_url: "http://localhost:11434"
-  default_model: "llama3"
+  default_model: "llama3.2"
 ```
 
-Example environment variables:
-
+**Key environment variables:**
 ```bash
 export MCP_SERVER__MODE=prod
 export MCP_SECURITY__AUTH_KEYS='["key1", "key2"]'
 export MCP_CLIENT_KEY="key1"
 ```
 
-The environment variable reference file is [`.env.example`](/Users/shashank/MCPP/mcp-server/.env.example:1).
+All supported environment variables are documented in [`.env.example`](./.env.example).
 
 ---
 
-## Manual Smoke Test
+## Built-In Tools
 
-You can send raw JSON-RPC over `stdio` to understand the protocol shape.
+| Tool | Scope Required | Description |
+|------|----------------|-------------|
+| `echo` | `tools:util:echo` | Echoes a message back to the caller |
+| `ollama-chat` | `tools:ollama:chat` | Send a chat message list to the local Ollama model |
+| `ollama-list-models` | `tools:ollama:list` | List all locally available Ollama models |
+| `weather-get` | `tools:weather:get` | Fetch current weather for a location via wttr.in |
+
+## Built-In Resources
+
+| URI | Description |
+|-----|-------------|
+| `config://server` | Read-only JSON snapshot of the active server configuration |
+
+---
+
+## Security Model
+
+This server implements a **Defense-in-Depth** security model at the protocol level. Every incoming MCP request — including `initialize`, `tools/list`, and `tools/call` — is routed through the `SecurityInterceptor` before any server logic executes.
+
+```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#000000","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
+flowchart TD
+    Req["Incoming MCP Request"] --> Auth["1. Authenticate (Identity Resolution)"]
+    Auth --> Rate["2. Rate Limit by Identity"]
+    Rate --> Scope["3. Authorize by Scope"]
+    Scope --> Bounds["4. Check Size + Timeout Bounds"]
+    Bounds --> Exec["5. Execute Tool or Resource"]
+    Exec --> Audit["6. Write Audit Log"]
+    Scope --> Deny["Reject — Forbidden (-32005)"]
+    Rate --> Throttle["Reject — Rate Limited"]
+    Auth --> Reject["Reject — Unauthenticated"]
+```
+
+### Authentication
+
+- **SSE transport**: reads `X-MCP-Client-Key` header or `Authorization: Bearer <key>`
+- **Stdio transport**: reads `MCP_CLIENT_KEY` environment variable
+
+### Server Modes
+
+| Mode | Behaviour |
+|------|-----------|
+| `local` | Convenient defaults, no auth key required |
+| `dev` | Relaxed auth, useful for development |
+| `prod` | Strict — requires auth keys, grants zero default scopes |
+
+### Authorization (Least Privilege)
+
+Tools declare the scopes they require at registration time. A client that holds `tools:weather:get` but tries to call `ollama-chat` receives a `-32005 Forbidden` error.
+
+### Rate Limiting
+
+Requests are bucketed by resolved identity:
+
+- Authenticated clients → bucketed by SHA-256 fingerprint of their API key
+- Unauthenticated SSE clients → bucketed by client IP address
+- Unauthenticated stdio clients → shared anonymous label
+
+```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#000000","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
+flowchart LR
+    A["Client A"] --> RL["Rate Limiter (per Identity)"]
+    B["Client B"] --> RL
+    C["Client N"] --> RL
+    RL --> Q["Concurrency Guard (asyncio.Semaphore)"]
+    Q --> O["Ollama Provider"]
+```
+
+### Audit Logging
+
+Structured audit events are written to `stderr` (keeping `stdout` clean for stdio protocol traffic). Each event records the resolved identity, method invoked, and the final status: `SUCCESS`, `UNAUTHORIZED`, `FORBIDDEN`, `RATE_LIMITED`, or `ERROR`.
+
+> [!TIP]
+> For the full threat model, design rationale, and future enhancement paths (mTLS, OAuth2/OIDC, WebAssembly sandboxing, DLP), see [SECURITY_ARCHITECTURE.md](./SECURITY_ARCHITECTURE.md).
+
+---
+
+## Beginner Walkthrough: Reading the Code in Order
+
+If your goal is to understand how the server works, read the files in this sequence:
+
+### Step 1. Start the server
+```bash
+make run
+```
+
+### Step 2. Read the entry point
+Open [`mcp_server/main.py`](./mcp_server/main.py).
+
+Notice the startup flow:
+- load settings from config and environment
+- create the Ollama provider
+- create auth, audit logger, and rate limiter
+- create the `SecureMCP` app
+- register tools and resources
+- run the transport
+
+### Step 3. Inspect a simple tool
+Open [`mcp_server/tools/util.py`](./mcp_server/tools/util.py).
+
+This is the simplest MCP concept in the repo:
+
+```python
+@app.tool(
+    name="echo",
+    description="Echo a message back to the caller",
+    required_scopes=["tools:util:echo"]
+)
+def echo(message: str) -> str:
+    return f"Echo: {message}"
+```
+
+This shows how a tool is named, how arguments are typed, how a return value is sent, and how authorization scopes are attached.
+
+### Step 4. Inspect the LLM tool
+Open [`mcp_server/tools/llm.py`](./mcp_server/tools/llm.py).
+
+This shows how an MCP tool acts as a secure proxy around a local LLM backend, including concurrency control via the `ConcurrencyLimitedProvider`.
+
+### Step 5. Inspect the weather tool
+Open [`mcp_server/tools/weather.py`](./mcp_server/tools/weather.py).
+
+A practical example of a tool that calls an external HTTP service, protected by its own scope (`tools:weather:get`).
+
+### Step 6. Inspect the security layer
+Open these files in order:
+
+1. [`mcp_server/security/interceptor.py`](./mcp_server/security/interceptor.py) — the central funnel
+2. [`mcp_server/security/auth.py`](./mcp_server/security/auth.py) — identity resolution
+3. [`mcp_server/security/rate_limiter.py`](./mcp_server/security/rate_limiter.py) — per-identity throttling
+4. [`mcp_server/security/audit.py`](./mcp_server/security/audit.py) — structured logging
+
+This is where the repo goes beyond a toy example.
+
+### Step 7. Read the security architecture doc
+Open [SECURITY_ARCHITECTURE.md](./SECURITY_ARCHITECTURE.md) to understand the threat model, design decisions, and future enhancement paths.
+
+### File Reading Summary
+
+```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#000000","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
+flowchart TD
+    A["main.py"] --> B["core/app.py"]
+    B --> C["tools/util.py"]
+    B --> D["tools/llm.py"]
+    B --> E["tools/weather.py"]
+    B --> F["resources.py"]
+    B --> G["security/interceptor.py"]
+    G --> H["security/auth.py"]
+    G --> I["security/rate_limiter.py"]
+    G --> J["security/audit.py"]
+    A --> K["providers/ollama.py"]
+    A --> L["SECURITY_ARCHITECTURE.md"]
+```
+
+---
+
+## Manual Smoke Test (stdio)
+
+You can send raw JSON-RPC over stdio to see the protocol in action without any UI:
 
 ```bash
 export MCP_CLIENT_KEY="your-secret-key"
@@ -589,13 +324,11 @@ printf '%s\n%s\n' \
   | python3 -m mcp_server.main
 ```
 
-This is useful if you want to see MCP requests without a UI.
-
 ---
 
 ## Claude Desktop Integration
 
-Add this to your Claude Desktop config:
+Add this block to your Claude Desktop config (`claude_desktop_config.json`):
 
 ```json
 {
@@ -603,7 +336,7 @@ Add this to your Claude Desktop config:
     "local-ollama": {
       "command": "python3",
       "args": ["-m", "mcp_server.main", "--transport", "stdio"],
-      "cwd": "/path/to/MCPP/mcp-server"
+      "cwd": "/path/to/MCPP/2-server"
     }
   }
 }
@@ -611,57 +344,31 @@ Add this to your Claude Desktop config:
 
 ---
 
-## Built-In Tools
-
-| Tool | Description |
-|---|---|
-| `echo` | Echo a message back |
-| `ollama-chat` | Send chat messages to the local Ollama model |
-| `ollama-list-models` | List locally available Ollama models |
-
-## Built-In Resources
-
-| URI | Description |
-|---|---|
-| `config://server` | Read-only JSON describing active server configuration |
-
----
-
-## Development
+## Development Commands
 
 ```bash
-make dev
-make test
-make lint
-make check-ollama
-make clean
+make dev             # install dev dependencies
+make test            # run the test suite
+make lint            # run ruff linter
+make check-ollama    # verify Ollama is reachable
+make clean           # remove build artifacts and caches
 ```
 
 ---
 
 ## Current Limitations
 
-This repo is a solid local learning project and a good implementation base, but it is not a perfect production platform yet.
+This is a solid local learning project and a good implementation base. Known limitations:
 
-Current limitations include:
-
-- rate limiting is in-memory and process-local
-- Ollama tool responses are not streamed
-- the provider currently uses a local Ollama backend only
-- the project is strongest as a local/self-hosted example, not a large distributed deployment
+- Rate limiting is in-memory and process-local (not shared across replicas).
+- Ollama tool responses are not streamed — the full response is collected before returning.
+- The provider layer currently supports Ollama only; other backends require a new provider implementation.
+- Best suited for local/self-hosted use — not designed for large distributed deployments as-is.
 
 ---
 
-## If You Are Completely New To MCP
+## ➡️ Next Step
 
-Start here:
+With the server running in SSE mode (`make run-server-sse`), move on to:
 
-1. Read the `What Is MCP?` section in this README.
-2. Run the server and client locally.
-3. Read [`mcp_server/main.py`](/Users/shashank/MCPP/mcp-server/mcp_server/main.py:1).
-4. Read the `echo` tool in [`mcp_server/api/tools/util.py`](/Users/shashank/MCPP/mcp-server/mcp_server/api/tools/util.py:1).
-5. Read the client flow in [`ui/chat_service.py`](/Users/shashank/MCPP/mcp-server/ui/chat_service.py:18).
-6. Read [SECURITY_ARCHITECTURE.md](/Users/shashank/MCPP/mcp-server/SECURITY_ARCHITECTURE.md:1).
-7. Read the security files once the basic flow makes sense.
-
-If you do that in order, this repo becomes much easier to learn from.
+**[Component 3: The MCP Client (`3-client/`)](../3-client/README.md)**
