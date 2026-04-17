@@ -24,6 +24,29 @@ This is a **Streamlit-based chat interface** that connects to the MCP server ove
 
 ---
 
+## MCP Client Pattern: The Minimum
+
+Before reading the full implementation, here is the bare-minimum MCP client — the pattern that everything in `chat_service.py` is built on:
+
+```python
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
+async with sse_client("http://127.0.0.1:8080/sse") as (read_stream, write_stream):
+    async with ClientSession(read_stream, write_stream) as session:
+        await session.initialize()
+        result = await session.call_tool("echo", arguments={"message": "hello"})
+```
+
+Three steps:
+1. Open a transport connection (`sse_client` for HTTP, or `stdio_client` for local pipes)
+2. Wrap it in a `ClientSession` and call `initialize()`
+3. Call any tool by name with typed arguments
+
+In this repo, that pattern is extended with authentication headers, input validation, and a 10-message context window — all in [`chat_service.py`](./chat_service.py).
+
+---
+
 ## File Structure
 
 ```text

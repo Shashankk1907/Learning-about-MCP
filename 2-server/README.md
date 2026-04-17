@@ -16,6 +16,116 @@ This is the "brain" of the stack. It is a [FastMCP](https://github.com/jlowin/fa
 
 ---
 
+## MCP Concepts With Tiny Examples
+
+These are teaching snippets — the absolute minimum code needed to understand each MCP primitive. The full implementation in this repo is more structured and secure, but everything ultimately builds on these ideas.
+
+### 1. Minimal MCP Server
+
+The basic idea: create a server, register capabilities, run it.
+
+```python
+from mcp.server.fastmcp import FastMCP
+
+app = FastMCP("Example Server")
+
+@app.tool()
+def echo(message: str) -> str:
+    return f"Echo: {message}"
+
+app.run(transport="stdio")
+```
+
+In this repo, that idea is extended by `SecureMCP` in [`mcp_server/core/app.py`](./mcp_server/core/app.py), which adds authentication, authorization, rate limiting, and audit logging around the standard FastMCP server.
+
+### 2. Minimal Tool
+
+A tool is something the client can execute. It is registered with a decorator and typed:
+
+```python
+@app.tool(name="add")
+def add(a: int, b: int) -> int:
+    return a + b
+```
+
+In this repo, tool registration happens per file:
+
+- [`mcp_server/tools/util.py`](./mcp_server/tools/util.py) — `echo`
+- [`mcp_server/tools/llm.py`](./mcp_server/tools/llm.py) — `ollama-chat`, `ollama-list-models`
+- [`mcp_server/tools/weather.py`](./mcp_server/tools/weather.py) — `weather-get`
+
+### 3. Minimal Resource
+
+A resource is read-only context exposed by the server. It is referenced by a URI:
+
+```python
+@app.resource("config://app")
+def app_config() -> str:
+    return '{"name": "demo", "env": "local"}'
+```
+
+In this repo, the built-in resource is registered in [`mcp_server/resources.py`](./mcp_server/resources.py) and is accessible at `config://server`.
+
+### 4. SecureMCP — This Repo's Extension of FastMCP
+
+`SecureMCP` (in [`mcp_server/core/app.py`](./mcp_server/core/app.py)) is a thin security wrapper around standard `FastMCP`. It is the central object that wires every component together.
+
+**What it adds on top of vanilla FastMCP:**
+
+| Feature | How |
+|---------|-----|
+| Scope registry | `_tool_scopes` and `_resource_scopes` dicts map each tool/resource name to a list of required scopes |
+| Secure tool decorator | `.tool(required_scopes=[...])` registers the scope alongside the FastMCP handler |
+| Secure resource decorator | `.resource(uri, required_scopes=[...])` does the same for resources |
+| Interceptor wiring | `.run()` calls `interceptor.apply()` to wrap every low-level MCP handler *before* serving |
+
+**What it looks like at construction time (from `main.py`):**
+
+```python
+app = SecureMCP(
+    name="local-mcp-server",
+    settings=settings,
+    auth_provider=auth_provider,
+    audit_logger=audit_logger,
+    rate_limiter=rate_limiter,
+)
+```
+
+**What registering a secure tool looks like:**
+
+```python
+@app.tool(
+    name="echo",
+    description="Echo a message back to the caller",
+    required_scopes=["tools:util:echo"]
+)
+def echo(message: str) -> str:
+    return f"Echo: {message}"
+```
+
+When a client calls `echo`, the `SecurityInterceptor` checks:
+1. Is the caller authenticated?
+2. Does their identity hold the `tools:util:echo` scope?
+3. Are they within their rate limit?
+
+Only if all three pass does the actual `echo` function run:
+
+```mermaid
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#000000","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
+flowchart LR
+    A["@app.tool(required_scopes=[...])"] --> B["FastMCP handler registered"]
+    A --> C["Scope stored in _tool_scopes"]
+    D["app.run()"] --> E["interceptor.apply(mcp_server)"]
+    E --> F["All handlers wrapped with security checks"]
+    F --> G["tools/call → auth → rate limit → scope → execute"]
+```
+
+**Why this design?**
+
+By keeping `SecureMCP` as a wrapper rather than a fork, the underlying FastMCP server remains standard and compatible with any MCP client. Security is layered *around* it, not baked into the protocol primitives — so you can strip it out, swap it, or extend it independently.
+
+---
+
 ## Project Structure
 
 ```text
