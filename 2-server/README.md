@@ -174,7 +174,7 @@ All supported environment variables are documented in [`.env.example`](./.env.ex
 This server implements a **Defense-in-Depth** security model at the protocol level. Every incoming MCP request — including `initialize`, `tools/list`, and `tools/call` — is routed through the `SecurityInterceptor` before any server logic executes.
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#000000","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
 flowchart TD
     Req["Incoming MCP Request"] --> Auth["1. Authenticate (Identity Resolution)"]
     Auth --> Rate["2. Rate Limit by Identity"]
