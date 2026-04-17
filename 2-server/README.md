@@ -284,7 +284,7 @@ All supported environment variables are documented in [`.env.example`](./.env.ex
 This server implements a **Defense-in-Depth** security model at the protocol level. Every incoming MCP request — including `initialize`, `tools/list`, and `tools/call` — is routed through the `SecurityInterceptor` before any server logic executes.
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#000000","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
 flowchart TD
     Req["Incoming MCP Request"] --> Auth["1. Authenticate (Identity Resolution)"]
     Auth --> Rate["2. Rate Limit by Identity"]
@@ -323,7 +323,7 @@ Requests are bucketed by resolved identity:
 - Unauthenticated stdio clients → shared anonymous label
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#000000","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
 flowchart LR
     A["Client A"] --> RL["Rate Limiter (per Identity)"]
     B["Client B"] --> RL
@@ -404,7 +404,7 @@ Open [SECURITY_ARCHITECTURE.md](./SECURITY_ARCHITECTURE.md) to understand the th
 ### File Reading Summary
 
 ```mermaid
-%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#000000","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
+%%{init: {"theme":"base","themeVariables":{"primaryColor":"#ffffff","primaryTextColor":"#000000","primaryBorderColor":"#000000","lineColor":"#ffffff","secondaryColor":"#ffffff","tertiaryColor":"#ffffff","background":"#ffffff"}}}%%
 flowchart TD
     A["main.py"] --> B["core/app.py"]
     B --> C["tools/util.py"]
