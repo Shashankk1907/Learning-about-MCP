@@ -1,0 +1,13 @@
+server:
+  host: "127.0.0.1"
+  port: 8080
+  transport: "stdio"
+
+security:
+  rate_limit: 100
+  enable_audit_log: true
+
+llm:
+  provider: "ollama"
+  base_url: "http://localhost:11434"
+  default_model: "llama3"
